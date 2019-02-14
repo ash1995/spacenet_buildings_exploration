@@ -18,7 +18,6 @@ For further details, see:
 https://medium.com/the-downlinq/getting-started-with-spacenet-data-827fd2ec9f53
 '''
 
-from __future__ import print_function
 from matplotlib.collections import PatchCollection
 from osgeo import gdal, osr, ogr, gdalnumeric
 from matplotlib.patches import Polygon
@@ -29,24 +28,77 @@ import json
 import glob
 import sys
 import os
-
+import cv2
+import subprocess
+import geoio
 
 ####################
 # EDIT THESE PATHS
 # download spacenet utilities from:
 #   https://github.com/SpaceNetChallenge/utilities/tree/master/python/spaceNet 
-path_to_spacenet_utils = '/path_to_spacenet_utils'
+#path_to_spacenet_utils = '/home/ashwin/Desktop/SpaceNet/SpaceNet-OffNadir/spacenet_buildings_exploration/spaceNetUtilities'
+path_to_spacenet_utils = '/home/ashwin/Desktop/SpaceNet/SpaceNet-OffNadir/spacenet_buildings_exploration/spaceNetUtilitiesV3/utilities'
 # Set data dir
-spacenet_data_dir = '/path_to_spacenet_data'
+spacenet_data_dir = '/home/ashwin/Desktop/SpaceNet/SpaceNet-OffNadir/spacenet_buildings_exploration'
 # This is the directory where this script is located
 spacenet_explore_dir = os.path.dirname(os.path.realpath(__file__))
-# exclore N images in 3band data
+# explore N images in 3band data
 N_ims = 15
 ####################
 
 # import packages
 sys.path.extend([path_to_spacenet_utils])
-from spaceNetUtilities import geoTools as gT
+
+print(sys.path)
+from spaceNetUtilities import spacenetutilities
+from spacenetutilities import geoTools as gT
+
+
+
+
+
+
+def convert_to_8Bit(inputRaster, outputRaster,
+                           outputPixType='Byte',
+                           outputFormat='GTiff',
+                           rescale_type='rescale',
+                           percentiles=[2, 98]):
+    '''
+    Convert 16bit image to 8bit
+    rescale_type = [clip, rescale]
+        if clip, scaling is done strictly between 0 65535 
+        if rescale, each band is rescaled to a min and max 
+        set by percentiles
+    '''
+    srcRaster = gdal.Open(inputRaster)
+    cmd = ['gdal_translate', '-ot', outputPixType, '-of', 
+           outputFormat]
+    
+    # iterate through bands
+    for bandId in range(srcRaster.RasterCount-1):
+        bandId = bandId+1
+        band = srcRaster.GetRasterBand(bandId)
+        if rescale_type == 'rescale':
+            bmin = band.GetMinimum()        
+            bmax = band.GetMaximum()
+            # if not exist minimum and maximum values
+            if bmin is None or bmax is None:
+                (bmin, bmax) = band.ComputeRasterMinMax(1)
+            # else, rescale
+            band_arr_tmp = band.ReadAsArray()
+            bmin = np.percentile(band_arr_tmp, percentiles[0])
+            bmax= np.percentile(band_arr_tmp, percentiles[1])
+        else:
+            bmin, bmax = 0, 65535
+        cmd.append('-scale_{}'.format(bandId))
+        cmd.append('{}'.format(bmin))
+        cmd.append('{}'.format(bmax))
+        cmd.append('{}'.format(0))
+        cmd.append('{}'.format(255))
+    cmd.append(inputRaster)
+    cmd.append(outputRaster)
+    print("Conversion command:", cmd)
+    subprocess.call(cmd)
 
        
 ###############################################################################    
@@ -59,7 +111,11 @@ def geojson_to_pixel_arr(raster_file, geojson_file, pixel_ints=True,
     
     # load geojson file
     with open(geojson_file) as f:
-        geojson_data = json.load(f)
+        try:
+            geojson_data = json.load(f)
+        except json.decoder.JSONDecodeError:
+            print("Empty image")
+            return [], []
 
     # load raster file and get geo transforms
     src_raster = gdal.Open(raster_file)
@@ -84,7 +140,7 @@ def geojson_to_pixel_arr(raster_file, geojson_file, pixel_ints=True,
         latlons.append(coords_tmp)
         types.append(type_tmp)
         #print feature['geometry']['type']
-    
+    # ERROR 1: latitude or longitude exceeded limits
     # convert latlons to pixel coords
     pixel_coords = []
     latlon_coords = []
@@ -109,9 +165,11 @@ def geojson_to_pixel_arr(raster_file, geojson_file, pixel_ints=True,
                     if verbose: 
                         print ("coord:", coord)
                     lon, lat, z = coord 
-                    px, py = gT.latlon2pixel(lat, lon, input_raster=src_raster, 
-                                         targetsr=targetsr, 
-                                         geom_transform=geom_transform)
+                    #px, py = gT.latlon2pixel(lat, lon, input_raster=src_raster, 
+                    #                     targetsr=targetsr, 
+                    #                     geom_transform=geom_transform)
+                    img = geoio.GeoImage(raster_file)#Ash
+                    px, py = img.proj_to_raster(lon, lat)#Ash
                     poly_list_pix.append([px, py])
                     if verbose:
                         print ("px, py", px, py)
@@ -128,7 +186,7 @@ def geojson_to_pixel_arr(raster_file, geojson_file, pixel_ints=True,
             poly=np.array(poly0)
             if verbose:
                 print ("poly.shape:", poly.shape)
-                
+
             # account for nested arrays
             if len(poly.shape) == 3 and poly.shape[0] == 1:
                 poly = poly[0]
@@ -140,10 +198,12 @@ def geojson_to_pixel_arr(raster_file, geojson_file, pixel_ints=True,
             for coord in poly:
                 if verbose: 
                     print ("coord:", coord)
-                lon, lat, z = coord 
-                px, py = gT.latlon2pixel(lat, lon, input_raster=src_raster, 
-                                     targetsr=targetsr, 
-                                     geom_transform=geom_transform)
+                lon, lat = coord 
+                #px, py = gT.latlon2pixel(lat, lon, input_raster=src_raster, 
+                #                     targetsr=targetsr, 
+                #                     geom_transform=geom_transform)
+                img = geoio.GeoImage(raster_file)#Ash
+                px, py = img.proj_to_raster(lon, lat)#Ash
                 poly_list_pix.append([px, py])
                 if verbose:
                     print ("px, py", px, py)
@@ -162,8 +222,7 @@ def geojson_to_pixel_arr(raster_file, geojson_file, pixel_ints=True,
         
         else:
             print ("Unknown shape type:", poly_type, " in geojson_to_pixel_arr()")
-            return
-            
+            return        
     return pixel_coords, latlon_coords
 
 ###############################################################################
@@ -600,9 +659,9 @@ def plot_all_transforms(input_image, pixel_coords, mask_image, dist_image,
 ###############################################################################
 def main():    
 
-    imDir = os.path.join(spacenet_data_dir, '3band')
-    vecDir = os.path.join(spacenet_data_dir, 'vectorData/geoJson')
-    imDir_out = os.path.join(spacenet_explore_dir, '3band')
+    imDir = os.path.join(spacenet_data_dir, 'images')
+    vecDir = '/home/ashwin/Desktop/SpaceNet/SpaceNet-OffNadir/Annotation_Playground/geojson/spacenet-buildings'#os.path.join(spacenet_data_dir, 'vectorData/geoJson')
+    imDir_out = os.path.join(spacenet_explore_dir, '8bit')
 
     ground_truth_patches = []
     pos_val, pos_val_vis = 1, 255
@@ -610,42 +669,45 @@ def main():
     ########################
     # Create directories
 
-    #coordsDir = spacenet_explore_dir + 'pixel_coords_mask/'
     coords_demo_dir = os.path.join(spacenet_explore_dir, 'pixel_coords_demo')
 
     maskDir = os.path.join(spacenet_explore_dir, 'building_mask')
     maskDir_vis = os.path.join(spacenet_explore_dir, 'building_mask_vis')
     mask_demo_dir = os.path.join(spacenet_explore_dir, 'mask_demo')
 
-    distDir = os.path.join(spacenet_explore_dir, 'distance_trans')
-    dist_demo_dir = os.path.join(spacenet_explore_dir, 'distance_trans_demo')
-    
-    all_demo_dir = os.path.join(spacenet_explore_dir, 'all_demo')
-
     # make dirs
-    for p in [imDir_out, coords_demo_dir, maskDir, maskDir_vis, mask_demo_dir,
-              distDir, dist_demo_dir, all_demo_dir]:
+    for p in [imDir_out, coords_demo_dir, maskDir, maskDir_vis, mask_demo_dir]:
         if not os.path.exists(p):
             os.mkdir(p)
 
     # get input images and copy to working directory
-    rasterList = glob.glob(os.path.join(imDir, '*.tif'))[10:10+N_ims]   
+    rasterList = glob.glob(os.path.join(imDir, '*.tif'))[:]#[10:10+N_ims]   
     for im_tmp in rasterList:
         shutil.copy(im_tmp, imDir_out)
+
+
+    print("Converting Tiffs:")
+    for i, rasterSrc in enumerate(rasterList):
+        print(rasterSrc)
+        convert_to_8Bit(rasterSrc, os.path.join(imDir_out,os.path.basename(rasterSrc)))
+    rasterList = glob.glob(os.path.join(imDir_out, '*.tif'))[:]
             
     # Create masks and demo images
     pixel_coords_list = []
+    print("Number of images to be evaluated =",len(rasterList))
     for i,rasterSrc in enumerate(rasterList):
         
         print (i, "Evaluating", rasterSrc)
 
-        input_image = plt.imread(rasterSrc) # cv2.imread(rasterSrc, 1)
+        input_image = cv2.imread(rasterSrc, 1)#plt.imread(rasterSrc) # 
         
          # get name root
         name_root0 = rasterSrc.split('/')[-1].split('.')[0]
         # remove 3band or 8band prefix
-        name_root = name_root0[6:]
-        vectorSrc = os.path.join(vecDir, name_root + '_Geo.geojson')
+        name_root = "spacenet-buildings_" + name_root0[-14:]
+        #print(name_root0) ->>> Pan-Sharpen_Atlanta_nadir53_catid_1030010003CD4300_744401_3737289
+        #print(name_root) ->>>>> spacenet-buildings_744401_3737289
+        vectorSrc = os.path.join(vecDir, name_root + '.geojson')
         maskSrc = os.path.join(maskDir, name_root0 + '.tif')
         
         ####################################################
@@ -654,6 +716,18 @@ def main():
             geojson_to_pixel_arr(rasterSrc, vectorSrc, 
                                                       pixel_ints=True,
                                                       verbose=False)
+
+        if len(pixel_coords) == 0:
+            import numpy as np
+            from scipy.misc import imread,imsave
+            print("Save black image")
+            img = np.zeros([900,900,3],dtype=np.uint8)
+            img.fill(0) # or img[:] = 255    
+            imsave(rasterSrc,img)
+            continue
+
+
+
         pixel_coords_list.append(pixel_coords)
        
         plot_name = os.path.join(coords_demo_dir, name_root + '.png')
@@ -688,38 +762,38 @@ def main():
         ####################################################   
         
         ####################################################
-        # signed distance transform
-        # remove 3band or 8band prefix
-        outfile = os.path.join(distDir, name_root0 + '.npy')#'.tif'    
-        create_dist_map(rasterSrc, vectorSrc, 
-                                        npDistFileName=outfile, 
-                                        noDataValue=0, burn_values=pos_val, 
-                                        dist_mult=1, vmax_dist=64)
-        # plot
-        #plot_name = os.path.join(dist_demo_dir + name_root, '_no_colorbar.png')
-        plot_name = os.path.join(dist_demo_dir, name_root + '.png')
-        mask_image = plt.imread(maskSrc)    # cv2.imread(maskSrc, 0)
-        dist_image = np.load(outfile)
-        plot_dist_transform(input_image, pixel_coords, 
-                                                dist_image, figsize=(8,8),
-                                                plot_name=plot_name, 
-                                                add_title=False,
-                                                colorbar=True)#False)
-        plt.close('all')
+        # # signed distance transform
+        # # remove 3band or 8band prefix
+        # outfile = os.path.join(distDir, name_root0 + '.npy')#'.tif'    
+        # create_dist_map(rasterSrc, vectorSrc, 
+        #                                 npDistFileName=outfile, 
+        #                                 noDataValue=0, burn_values=pos_val, 
+        #                                 dist_mult=1, vmax_dist=64)
+        # # plot
+        # #plot_name = os.path.join(dist_demo_dir + name_root, '_no_colorbar.png')
+        # plot_name = os.path.join(dist_demo_dir, name_root + '.png')
+        # mask_image = plt.imread(maskSrc)    # cv2.imread(maskSrc, 0)
+        # dist_image = np.load(outfile)
+        # plot_dist_transform(input_image, pixel_coords, 
+        #                                         dist_image, figsize=(8,8),
+        #                                         plot_name=plot_name, 
+        #                                         add_title=False,
+        #                                         colorbar=True)#False)
+        # plt.close('all')
         ####################################################
 
         ####################################################
-        # plot all transforms
-        plot_name = os.path.join(all_demo_dir, name_root + '.png')#+ '_titles.png'
-        mask_image = plt.imread(maskSrc)    # cv2.imread(maskSrc, 0)
-        dist_image = np.load(outfile)
-        plot_all_transforms(input_image, pixel_coords, mask_image, dist_image, 
-                        figsize=(8,8), plot_name=plot_name, add_global_title=False, 
-                        colorbar=False, 
-                        add_titles=False,#True,
-                        poly_face_color='orange', poly_edge_color='red', 
-                        poly_nofill_color='blue', cmap='bwr')        
-        plt.close('all')
+        # # plot all transforms
+        # plot_name = os.path.join(all_demo_dir, name_root + '.png')#+ '_titles.png'
+        # mask_image = plt.imread(maskSrc)    # cv2.imread(maskSrc, 0)
+        # dist_image = np.load(outfile)
+        # plot_all_transforms(input_image, pixel_coords, mask_image, dist_image, 
+        #                 figsize=(8,8), plot_name=plot_name, add_global_title=False, 
+        #                 colorbar=False, 
+        #                 add_titles=False,#True,
+        #                 poly_face_color='orange', poly_edge_color='red', 
+        #                 poly_nofill_color='blue', cmap='bwr')        
+        # plt.close('all')
         ####################################################
 
 

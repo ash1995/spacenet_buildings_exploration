@@ -1,5 +1,7 @@
 SpaceNet Buildings Exploration
 
+This is a fork of avanettan's original repository with some updates.
+
 Transform SpaceNet geojson buidling labels data into raster masks.
 Download data via:
 
@@ -8,7 +10,7 @@ Download data via:
     --request-payer requester processedBuildingLabels.tar.gz
 
 Download spacenet utilities from:
-   https://github.com/SpaceNetChallenge/utilities/tree/master/python/spaceNet 
+   https://github.com/SpaceNetChallenge/utilities/tree/spacenetV3 
 
 For further details, see:
     https://medium.com/the-downlinq/getting-started-with-spacenet-data-827fd2ec9f53
