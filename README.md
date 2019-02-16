@@ -17,4 +17,4 @@ For further details, see:
 
 Example outputs are included in the example_outputs directory
 
-![Alt text](/example_outputs/all_demo/013022223130_Public_img54.png?raw=true "Figure 1")
+![Alt text](/example_outputs_adam/all_demo/013022223130_Public_img54.png?raw=true "Figure 1")
