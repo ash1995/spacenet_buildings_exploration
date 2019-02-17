@@ -55,7 +55,18 @@ from spacenetutilities import geoTools as gT
 
 
 
+def tifconv(inputRaster,outputRaster,ext_choice='.jpg'):
 
+    """
+    Converts geotif to jpg
+    """
+    gimg = gdal.Open(inputRaster)
+    scale=[]
+    for i in range(3):
+        arr = gimg.GetRasterBand(i+1).ReadAsArray()
+        scale.append([np.percentile(arr, 2), np.percentile(arr, 98)])
+
+    gdal.Translate(outputRaster[:-4]+ext_choice, inputRaster, options=gdal.TranslateOptions(outputType=gdal.GDT_Byte, scaleParams=scale))
 
 
 def convert_to_8Bit(inputRaster, outputRaster,
@@ -75,8 +86,8 @@ def convert_to_8Bit(inputRaster, outputRaster,
            outputFormat]
     
     # iterate through bands
-    for bandId in range(srcRaster.RasterCount-1):
-        bandId = bandId+1
+    for bandId in range(1,srcRaster.RasterCount):
+        #bandId = bandId+1
         band = srcRaster.GetRasterBand(bandId)
         if rescale_type == 'rescale':
             bmin = band.GetMinimum()        
@@ -663,6 +674,12 @@ def main():
     vecDir = '/home/ashwin/Desktop/SpaceNet/SpaceNet-OffNadir/Annotation_Playground/geojson/spacenet-buildings'#os.path.join(spacenet_data_dir, 'vectorData/geoJson')
     imDir_out = os.path.join(spacenet_explore_dir, '8bit')
 
+    ext_choice = ".jpg"
+    assert ext_choice in [".jpg", ".JPG",".png",".PNG"]
+    ext_choice = ext_choice.lower()
+
+    imDir_out_jpg = os.path.join(spacenet_explore_dir, ext_choice[1:])
+
     ground_truth_patches = []
     pos_val, pos_val_vis = 1, 255
  
@@ -676,7 +693,7 @@ def main():
     mask_demo_dir = os.path.join(spacenet_explore_dir, 'mask_demo')
 
     # make dirs
-    for p in [imDir_out, coords_demo_dir, maskDir, maskDir_vis, mask_demo_dir]:
+    for p in [imDir_out, imDir_out_jpg, coords_demo_dir, maskDir, maskDir_vis, mask_demo_dir]:
         if not os.path.exists(p):
             os.mkdir(p)
 
@@ -684,13 +701,22 @@ def main():
     rasterList = glob.glob(os.path.join(imDir, '*.tif'))[:]#[10:10+N_ims]   
     for im_tmp in rasterList:
         shutil.copy(im_tmp, imDir_out)
+        shutil.copy(im_tmp, imDir_out_jpg)
 
 
     print("Converting Tiffs:")
     for i, rasterSrc in enumerate(rasterList):
         print(rasterSrc)
         convert_to_8Bit(rasterSrc, os.path.join(imDir_out,os.path.basename(rasterSrc)))
+        tifconv(rasterSrc, os.path.join(imDir_out_jpg,os.path.basename(rasterSrc)),ext_choice)
     rasterList = glob.glob(os.path.join(imDir_out, '*.tif'))[:]
+
+    # Keep only jpgs in jpg folder
+
+    for item in os.listdir(imDir_out_jpg):
+        if item.endswith(ext_choice) is False:
+            os.remove(os.path.join(imDir_out_jpg, item))
+
             
     # Create masks and demo images
     pixel_coords_list = []
